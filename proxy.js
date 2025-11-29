@@ -10,6 +10,9 @@ const PORT = Number(process.env.PORT || 3000);
 const WAIT_MS = Number(process.env.WAIT_MS || 8000); // wait for CF JS challenge
 const DEBUG_PORT = Number(process.env.DEBUG_PORT || 9223);
 const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH;
+const EXTRA_ARGS = (process.env.PUPPETEER_ARGS || '')
+  .split(/\s+/)
+  .filter(Boolean);
 
 let cfCookie = process.env.CF_COOKIE || '';
 let cfUpdatedAt = 0;
@@ -24,6 +27,7 @@ async function ensureBrowser(headless = true) {
     '--disable-dev-shm-usage',
     '--disable-blink-features=AutomationControlled',
     '--lang=zh-CN,zh,en',
+    ...EXTRA_ARGS,
   ];
   if (headless) {
     if (headlessBrowser?.isConnected?.()) return headlessBrowser;
