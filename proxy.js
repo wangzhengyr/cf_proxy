@@ -31,22 +31,11 @@ async function ensureBrowser(headless = true) {
   ];
   if (headless) {
     if (headlessBrowser?.isConnected?.()) return headlessBrowser;
-    headlessBrowser = await puppeteer.launch({
-      headless: 'new',
-      args: commonArgs,
-      executablePath: EXECUTABLE_PATH,
-      ignoreDefaultArgs: ['--enable-automation'],
-    });
+    headlessBrowser = await launchBrowser(true, commonArgs);
     return headlessBrowser;
   }
   if (manualBrowser?.isConnected?.()) return manualBrowser;
-  manualBrowser = await puppeteer.launch({
-    headless: false,
-    args: [...commonArgs, `--remote-debugging-port=${DEBUG_PORT}`],
-    executablePath: EXECUTABLE_PATH,
-    ignoreDefaultArgs: ['--enable-automation'],
-    defaultViewport: { width: 1280, height: 800 },
-  });
+  manualBrowser = await launchBrowser(false, commonArgs);
   return manualBrowser;
 }
 
@@ -80,6 +69,9 @@ async function refreshCookie(headless = true, path = '/') {
   })();
   try {
     await refreshing;
+  } catch (err) {
+    markDead(headless ? headlessBrowser : manualBrowser, err);
+    throw err;
   } finally {
     refreshing = null;
   }
@@ -97,11 +89,16 @@ async function pullCookieFrom(browser) {
     }
   }
   // fallback: create a page to read cookies
-  const page = await browser.newPage();
+  let page;
   try {
+    page = await browser.newPage();
     await page.goto(UPSTREAM, { waitUntil: 'domcontentloaded', timeout: 20000 });
     const cookies = await page.cookies(UPSTREAM);
     return storeCookies(cookies);
+  } catch (err) {
+    console.warn('[pullCookieFrom] fallback failed', err?.message || err);
+    markDead(browser, err);
+    return false;
   } finally {
     await safeClose(page);
   }
@@ -211,6 +208,7 @@ app.get('/manual/refresh', async (_req, res) => {
       tip: `ssh -L ${DEBUG_PORT}:127.0.0.1:${DEBUG_PORT} server && chrome://inspect -> configure -> localhost:${DEBUG_PORT}`,
     });
   } catch (err) {
+    markDead(manualBrowser, err);
     res.status(500).json({ error: String(err) });
   }
 });
@@ -246,6 +244,7 @@ app.get('/proxy/*', async (req, res) => {
     }
     res.status(first.status).send(first.data);
   } catch (err) {
+    markDead(headlessBrowser, err);
     res.status(500).send('proxy error');
   }
 });
@@ -265,9 +264,14 @@ process.on('SIGTERM', async () => {
 });
 
 async function newPage(browser) {
-  const page = await browser.newPage();
-  await setupPage(page);
-  return page;
+  try {
+    const page = await browser.newPage();
+    await setupPage(page);
+    return page;
+  } catch (err) {
+    markDead(browser, err);
+    throw err;
+  }
 }
 
 async function setupPage(page) {
@@ -293,4 +297,26 @@ async function setupPage(page) {
           : originalQuery(parameters);
     }
   });
+}
+
+async function launchBrowser(headless, args) {
+  const opts = {
+    headless: headless ? 'new' : false,
+    args: headless ? args : [...args, `--remote-debugging-port=${DEBUG_PORT}`],
+    executablePath: EXECUTABLE_PATH,
+    ignoreDefaultArgs: ['--enable-automation'],
+    defaultViewport: { width: 1280, height: 800 },
+  };
+  const browser = await puppeteer.launch(opts);
+  browser.on('disconnected', () => {
+    markDead(browser, new Error('browser disconnected'));
+  });
+  return browser;
+}
+
+function markDead(browser, err) {
+  if (!browser) return;
+  if (browser === headlessBrowser) headlessBrowser = null;
+  if (browser === manualBrowser) manualBrowser = null;
+  console.warn('[browser dead]', err?.message || err);
 }
