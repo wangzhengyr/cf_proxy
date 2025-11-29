@@ -1,0 +1,15 @@
+{
+  "name": "cf-proxy",
+  "version": "0.0.1",
+  "private": true,
+  "main": "proxy.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node proxy.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "express": "^4.18.2",
+    "puppeteer": "^21.6.0"
+  }
+}
